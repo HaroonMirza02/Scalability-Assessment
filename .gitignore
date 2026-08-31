@@ -5,3 +5,4 @@ node_modules
 *.txt
 *.md
 db-data/
+uploads/
