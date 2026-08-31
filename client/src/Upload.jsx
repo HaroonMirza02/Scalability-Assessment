@@ -210,6 +210,29 @@ export default function Upload() {
         if (failedCount > 0) alert(`${failedCount} of ${matches.length} deletions failed.`);
     };
 
+    // ── Remove ALL stored files ─────────────────────────────────
+    const [clearingAll, setClearingAll] = useState(false);
+    const handleRemoveAll = async () => {
+        if (files.length === 0) return;
+        if (!window.confirm(`Delete all ${files.length} file${files.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+
+        setClearingAll(true);
+        try {
+            const result = await request('DELETE', '/api/files?all=true');
+            setFiles([]);
+            setPreviewFile(null);
+            if (result.deleted !== files.length) {
+                // Some files may have changed on disk between list and delete — resync from server
+                await fetchFiles();
+            }
+        } catch (err) {
+            alert(`Remove all failed: ${err.message}`);
+            await fetchFiles();
+        } finally {
+            setClearingAll(false);
+        }
+    };
+
     // ── Group for duplicate count badge ───────────────────────
     const nameCounts = {};
     files.forEach(f => { nameCounts[f.originalName] = (nameCounts[f.originalName] || 0) + 1; });
@@ -266,9 +289,19 @@ export default function Upload() {
                 <div className="upload-gallery-pane">
                     <div className="gallery-header">
                         <h3>Stored Files</h3>
-                        <button className="btn-secondary btn-sm" onClick={fetchFiles} disabled={listLoading}>
-                            {listLoading ? 'Loading...' : 'Refresh'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn-secondary btn-sm" onClick={fetchFiles} disabled={listLoading}>
+                                {listLoading ? 'Loading...' : 'Refresh'}
+                            </button>
+                            <button
+                                className="btn-secondary btn-sm danger-btn"
+                                onClick={handleRemoveAll}
+                                disabled={listLoading || clearingAll || files.length === 0}
+                                title="Delete every stored file"
+                            >
+                                {clearingAll ? 'Removing...' : `Remove All (${files.length})`}
+                            </button>
+                        </div>
                     </div>
 
                     {listError && (

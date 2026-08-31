@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const cors = require('cors');
 
 const JWT_SECRET = 'super_secret_scalability_token_key';
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,23 @@ const MONGO_URI = 'mongodb://127.0.0.1:27017/scalability_db';
 
 // App configuration and database setup
 const app = express();
+
+// CORS fix: without this, the file upload/preview/download/delete/clear
+// features only ever worked while the frontend happened to be routed
+// through Vite's dev-only proxy (npm run dev). Any other setup - a
+// production build, the frontend deployed separately, or the backend
+// opened on a different host/port - was silently blocked by the browser's
+// same-origin policy with no visible error beyond "it doesn't work".
+// CLIENT_ORIGIN can be set in production to lock this down to your real
+// frontend domain instead of allowing all origins.
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || true; // true = reflect request origin (dev-friendly)
+app.use(cors({
+    origin: CLIENT_ORIGIN,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition']
+}));
+
 app.use(express.json());
 
 // Log write stream
@@ -527,17 +545,26 @@ app.get('/api/files/:filename/download', authenticate, (req, res) => {
 });
 
 // Bulk-delete: DELETE /api/files?pattern=heavy_load_image.jpg
+// Remove-all:  DELETE /api/files?all=true  -> wipes every stored file
 app.delete('/api/files', authenticate, (req, res) => {
     const pattern = req.query.pattern;
-    if (!pattern) return res.status(400).json({ error: 'pattern query param required' });
+    const removeAll = req.query.all === 'true';
+
+    if (!pattern && !removeAll) {
+        return res.status(400).json({ error: 'pattern or all=true query param required' });
+    }
+
     const uploadsDir = path.join(__dirname, 'uploads');
     try {
         const all = fs.readdirSync(uploadsDir).filter(f => !f.startsWith('.'));
-        const toDelete = all.filter(f => {
-            const original = f.indexOf('-') !== -1 ? f.slice(f.indexOf('-') + 1) : f;
-            return original === pattern || f === pattern;
-        });
+        const toDelete = removeAll
+            ? all
+            : all.filter(f => {
+                const original = f.indexOf('-') !== -1 ? f.slice(f.indexOf('-') + 1) : f;
+                return original === pattern || f === pattern;
+            });
         toDelete.forEach(f => fs.unlinkSync(path.join(uploadsDir, f)));
+        writeLog('info', removeAll ? 'Remove-all: cleared uploads directory' : `Bulk delete by pattern "${pattern}"`, { deletedCount: toDelete.length });
         res.json({ deleted: toDelete.length, files: toDelete });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -653,6 +680,29 @@ app.use((err, req, res, next) => {
         message: err.message
     });
 });
+
+// -------------------------------------------------------------
+// SERVE BUILT FRONTEND (production)
+// -------------------------------------------------------------
+// The client uses relative fetch calls ('/api/...', '/uploads/...').
+// In dev, Vite's proxy (client/vite.config.js) forwards those to this
+// server. In production there is no such proxy, so unless the built
+// frontend is served from this exact same origin, every upload /
+// preview / download / delete / clear call silently 404s or gets
+// blocked by the browser (wrong origin). Run `npm run build` inside
+// client/ before deploying, and this will pick the build up automatically.
+const clientDistPath = path.join(__dirname, 'client', 'dist');
+if (fs.existsSync(clientDistPath)) {
+    app.use(express.static(clientDistPath));
+    // SPA fallback: any non-API, non-upload route serves index.html so
+    // client-side routing (React Router) works on a hard refresh / deep link.
+    app.get(/^(?!\/api|\/uploads).*/, (req, res) => {
+        res.sendFile(path.join(clientDistPath, 'index.html'));
+    });
+    writeLog('info', 'Serving built frontend from client/dist');
+} else {
+    writeLog('info', 'client/dist not found — run "npm run build" in client/ to serve the frontend from this server in production. Using Vite dev server + proxy for now.');
+}
 
 app.listen(PORT, () => {
     writeLog('info', `Server started and listening on port ${PORT}`);
