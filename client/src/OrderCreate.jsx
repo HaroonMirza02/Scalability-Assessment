@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { request } from './api';
 
 export default function OrderCreate() {
-    const navigate = useNavigate();
     const [customerName, setCustomerName] = useState('');
     const [item, setItem] = useState('');
     const [price, setPrice] = useState('');
@@ -12,6 +11,7 @@ export default function OrderCreate() {
 
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    const [createdMask, setCreatedMask] = useState('');
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -25,14 +25,15 @@ export default function OrderCreate() {
 
         setLoading(true);
         try {
-            await request('POST', '/api/orders', {
+            const created = await request('POST', '/api/orders', {
                 customerName: customerName.trim(),
                 item: item.trim(),
                 price: parseFloat(price),
                 quantity: parseInt(quantity),
-                creditCardNumber: creditCardNumber.trim() || 'Unavailable'
+                creditCardNumber: creditCardNumber.trim()
             });
-            navigate('/');
+            setCreditCardNumber('');
+            setCreatedMask(created.cardMasked || 'Unavailable');
         } catch (err) {
             setErrorMsg(err.message || 'Failed to submit order to pipeline.');
         } finally {
@@ -53,6 +54,12 @@ export default function OrderCreate() {
                 {errorMsg && (
                     <div className="message-box error-box margin-bottom-lg">
                         <span>{errorMsg}</span>
+                    </div>
+                )}
+
+                {createdMask && (
+                    <div className="message-box success-box margin-bottom-lg">
+                        <span>Order created. Card on file: {createdMask}</span>
                     </div>
                 )}
 

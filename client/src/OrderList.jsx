@@ -116,7 +116,7 @@ export default function OrderList() {
                                         <td className="text-right font-weight-600">
                                             ${(order.price * order.quantity).toFixed(2)}
                                         </td>
-                                        <td className="text-mono font-size-sm">{order.creditCardNumber || 'Unavailable'}</td>
+                                        <td className="text-mono font-size-sm">{order.cardMasked || 'Unavailable'}</td>
                                         <td className="text-secondary font-size-sm">
                                             {new Date(order.createdAt).toLocaleDateString()} {new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                         </td>

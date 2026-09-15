@@ -8,7 +8,8 @@ const OrderSchema = new mongoose.Schema({
     item: { type: String, required: true },
     price: { type: Number, required: true },
     quantity: { type: Number, required: true },
-    creditCardNumber: { type: String },
+    cardLastFour: { type: String, default: '' },
+    cardMasked: { type: String, default: 'Unavailable' },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -39,7 +40,7 @@ async function seed() {
             const price = parseFloat((Math.random() * 2000 + 10).toFixed(2));
             const quantity = Math.floor(Math.random() * 5) + 1;
             const createdAt = new Date(thirtyDaysAgo + Math.random() * (Date.now() - thirtyDaysAgo));
-            const cc = '4111-xxxx-xxxx-' + Math.floor(1000 + Math.random() * 9000);
+            const cardLastFour = String(Math.floor(1000 + Math.random() * 9000));
 
             bulkOrders.push({
                 userId: user._id,
@@ -47,7 +48,8 @@ async function seed() {
                 item,
                 price,
                 quantity,
-                creditCardNumber: cc,
+                cardLastFour,
+                cardMasked: '**** **** **** ' + cardLastFour,
                 createdAt
             });
         }

@@ -14,6 +14,7 @@ export default function OrderDetail() {
     const [price, setPrice] = useState('');
     const [quantity, setQuantity] = useState('');
     const [creditCardNumber, setCreditCardNumber] = useState('');
+    const [cardMasked, setCardMasked] = useState('Unavailable');
     const [createdAt, setCreatedAt] = useState('');
 
     const [errorMsg, setErrorMsg] = useState('');
@@ -29,7 +30,8 @@ export default function OrderDetail() {
             setItem(data.item || '');
             setPrice(data.price?.toString() || '');
             setQuantity(data.quantity?.toString() || '');
-            setCreditCardNumber(data.creditCardNumber || '');
+            setCreditCardNumber('');
+            setCardMasked(data.cardMasked || 'Unavailable');
             setCreatedAt(data.createdAt || '');
         } catch (err) {
             setErrorMsg(err.message || 'Could not fetch order specifications.');
@@ -55,20 +57,26 @@ export default function OrderDetail() {
 
         setSaving(true);
         try {
-            const response = await request('PUT', `/api/orders/${id}`, {
+            const payload = {
                 customerName: customerName.trim(),
                 item: item.trim(),
                 price: parseFloat(price),
-                quantity: parseInt(quantity),
-                creditCardNumber: creditCardNumber.trim() || 'Unavailable'
-            });
+                quantity: parseInt(quantity)
+            };
+            const typedCard = creditCardNumber.trim();
+            if (typedCard) {
+                payload.creditCardNumber = typedCard;
+            }
+
+            const response = await request('PUT', `/api/orders/${id}`, payload);
 
             // Show confirmation immediately since our API does not support fake optimistic UI. We show exact values confirming server state.
             setCustomerName(response.customerName);
             setItem(response.item);
             setPrice(response.price?.toString());
             setQuantity(response.quantity?.toString());
-            setCreditCardNumber(response.creditCardNumber);
+            setCreditCardNumber('');
+            setCardMasked(response.cardMasked || 'Unavailable');
 
             setInfoMsg('Order state saved and confirmed on server. Note: If another user modified this record concurrently, yours might overwrite their changes (last-write-wins policy is active at the DB tier).');
         } catch (err) {
@@ -185,10 +193,13 @@ export default function OrderDetail() {
                             </div>
 
                             <div className="form-group full-width">
-                                <label htmlFor="creditCardNumber">Credit Card Number Mock</label>
+                                <label>Card on file</label>
+                                <p className="text-mono font-size-sm">{cardMasked}</p>
+                                <label htmlFor="creditCardNumber">Credit Card Number Mock (Optional)</label>
                                 <input
                                     id="creditCardNumber"
                                     type="text"
+                                    placeholder="Leave blank to keep current masked value"
                                     value={creditCardNumber}
                                     onChange={(e) => setCreditCardNumber(e.target.value)}
                                     disabled={saving || deleting}

@@ -18,8 +18,8 @@ export default function Layout({ children }) {
         <div className="app-container">
             <header className="app-header">
                 <div className="header-brand">
-                    <Link to="/">VISION71</Link>
-                    <span className="badge">Scalability Hub</span>
+                    <Link to="/">Scalability Assessment</Link>
+
                 </div>
                 <nav className="header-nav">
                     <Link

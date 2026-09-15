@@ -140,9 +140,29 @@ const OrderSchema = new mongoose.Schema({
     item: { type: String, required: true },
     price: { type: Number, required: true },
     quantity: { type: Number, required: true },
-    creditCardNumber: { type: String },
+    cardLastFour: { type: String, default: '' },
+    cardMasked: { type: String, default: 'Unavailable' },
     createdAt: { type: Date, default: Date.now }
 });
+
+// Reduce an inbound card value to last-four + display mask only.
+// The full digit string is not returned and must not be stored or logged.
+function maskCardOnIngest(rawValue) {
+    const lastFour = String(rawValue ?? '').replace(/\D/g, '').slice(-4);
+    if (!lastFour) {
+        return { cardLastFour: '', cardMasked: 'Unavailable' };
+    }
+    return { cardLastFour: lastFour, cardMasked: '**** **** **** ' + lastFour };
+}
+
+function orderLogFields(body = {}) {
+    return {
+        customerName: body.customerName,
+        item: body.item,
+        price: body.price,
+        quantity: body.quantity
+    };
+}
 
 OrderSchema.index({ userId: 1 }); // DB Indexing fix: speed up filters by userId
 
@@ -153,8 +173,45 @@ const Order = mongoose.model('Order', OrderSchema);
 // Connection state helper
 mongoose.connect(MONGO_URI, {
     maxPoolSize: 100 // Connection pooling fix: expanded to 100 to handle higher concurrency
-}).then(() => {
+}).then(async () => {
     writeLog('info', 'Connected to MongoDB database (maxPoolSize: 100)');
+
+    // One-time migration: mask leftover plaintext card values and drop the old field.
+    try {
+        const cursor = Order.collection.find({
+            $or: [
+                { creditCardNumber: { $exists: true } },
+                { cardMasked: { $exists: false } }
+            ]
+        });
+        const ops = [];
+        let migrated = 0;
+        for await (const doc of cursor) {
+            const masked = Object.prototype.hasOwnProperty.call(doc, 'creditCardNumber')
+                ? maskCardOnIngest(doc.creditCardNumber)
+                : { cardLastFour: '', cardMasked: 'Unavailable' };
+            ops.push({
+                updateOne: {
+                    filter: { _id: doc._id },
+                    update: {
+                        $set: { cardLastFour: masked.cardLastFour, cardMasked: masked.cardMasked },
+                        $unset: { creditCardNumber: '' }
+                    }
+                }
+            });
+            migrated += 1;
+            if (ops.length === 500) {
+                await Order.collection.bulkWrite(ops);
+                ops.length = 0;
+            }
+        }
+        if (ops.length) {
+            await Order.collection.bulkWrite(ops);
+        }
+        writeLog('info', 'Card field migration complete', { documentsUpdated: migrated });
+    } catch (migErr) {
+        writeLog('error', 'Card field migration failed', { error: migErr.message });
+    }
 
     // Set MongoDB profile level to log queries slower than 50ms
     mongoose.connection.db.command({ profile: 2, slowms: 50 })
@@ -239,15 +296,19 @@ app.post('/api/orders', authenticate, async (req, res, next) => {
             return res.status(400).json({ error: 'Required fields missing: customerName, item, price, quantity' });
         }
 
+        const { cardLastFour, cardMasked } = maskCardOnIngest(creditCardNumber);
+
         const newOrder = new Order({
             userId: req.user.id,
             customerName,
             item,
             price,
             quantity,
-            creditCardNumber: creditCardNumber || 'Unavailable'
+            cardLastFour,
+            cardMasked
         });
         await newOrder.save();
+        writeLog('info', 'Order created', orderLogFields(req.body));
         res.status(201).json(newOrder);
     } catch (err) {
         next(err);
@@ -360,14 +421,21 @@ app.get('/api/orders/:id', authenticate, async (req, res, next) => {
 app.put('/api/orders/:id', authenticate, async (req, res, next) => {
     try {
         const { customerName, item, price, quantity, creditCardNumber } = req.body;
+        const update = { customerName, item, price, quantity };
+        if (Object.prototype.hasOwnProperty.call(req.body, 'creditCardNumber')) {
+            const masked = maskCardOnIngest(creditCardNumber);
+            update.cardLastFour = masked.cardLastFour;
+            update.cardMasked = masked.cardMasked;
+        }
         const updated = await Order.findOneAndUpdate(
             { _id: req.params.id, userId: req.user.id },
-            { customerName, item, price, quantity, creditCardNumber },
+            update,
             { new: true }
         );
         if (!updated) {
             return res.status(404).json({ error: 'Order not found' });
         }
+        writeLog('info', 'Order updated', orderLogFields(req.body));
         res.json(updated);
     } catch (err) {
         next(err);
